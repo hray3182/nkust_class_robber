@@ -2,13 +2,29 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
+	"robber/config"
+	"robber/module"
 	"time"
 )
+
+var UserInfo = module.LoginInfo{}
+var SolverAddress = ""
+
+func init() {
+	config.SetUpEnv()
+	// load .env
+	UserInfo.Username = os.Getenv("USERNAME")
+	UserInfo.Password = os.Getenv("PASSWORD")
+	SolverAddress = os.Getenv("CAPTCHA_SOLVER_IP")
+	fmt.Println(UserInfo, SolverAddress)
+}
 
 func main() {
 	// 初始化 HTTP 客戶端
@@ -32,7 +48,7 @@ func main() {
 	}
 
 	// 上傳圖片
-	err = uploadImage(imagePath, "http://192.168.0.153/recognize-text")
+	code, err := uploadImage(imagePath, fmt.Sprintf("http://%s/recognize-text", SolverAddress))
 	if err != nil {
 		panic(err)
 	}
@@ -52,10 +68,10 @@ func getValidationImage(client *http.Client) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func uploadImage(imagePath, url string) error {
+func uploadImage(imagePath, url string) (string, error) {
 	file, err := os.Open(imagePath)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer file.Close()
 
@@ -64,32 +80,40 @@ func uploadImage(imagePath, url string) error {
 
 	part, err := writer.CreateFormFile("image", file.Name())
 	if err != nil {
-		return err
+		return "", err
 	}
 	_, err = io.Copy(part, file)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	err = writer.Close()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	request, err := http.NewRequest("POST", url, body)
 	if err != nil {
-		return err
+		return "", err
 	}
 	request.Header.Set("Content-Type", writer.FormDataContentType())
 
 	client := &http.Client{}
 	response, err := client.Do(request)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer response.Body.Close()
 
-	// so something
+	// message will be like { text : "code"}
+	type Message struct {
+		Text string `json:"text"`
+	}
+	var message Message
+	err = json.NewDecoder(response.Body).Decode(&message)
+	if err != nil {
+		return "", err
+	}
 
-	return nil
+	return message.Text, nil
 }
